@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express'
-import { CompanyModel } from './edgar/db/edgar.db'
+import CompanyModel from './edgar/db/edgar.db'
 export const edgarRouter = Router()
 
 edgarRouter.get('/', async (req: Request, res: Response) => {

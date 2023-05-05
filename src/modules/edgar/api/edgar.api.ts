@@ -1,38 +1,62 @@
 import axios from 'axios'
-import JSZip from 'jszip'
+import AdmZip = require('adm-zip');
+import { Storage } from '@google-cloud/storage'
+import { pipeline } from 'stream/promises'
+import { Company } from '../db/edgar.db'
 import mongoose from 'mongoose'
 
-async function fetchCompanyFactsData(): Promise<Buffer> {
-	const response = await axios.get('https://www.sec.gov/Archives/edgar/daily-index/xbrl/companyfacts.zip', {
-		responseType: 'arraybuffer',
-	})
+const credentials = {
+	type: process.env.TYPE,
+	project_id: process.env.PROJECT_ID,
+	private_key_id: process.env.PRIVATE_KEY_ID,
+	private_key: process.env.PRIVATE_KEY,
+	client_email: process.env.CLIENT_EMAIL,
+	client_id: process.env.CLIENT_ID,
+	auth_uri: process.env.AUTH_URI,
+	token_uri: process.env.TOKEN_URI,
+	auth_provider_x509_cert_url: process.env.AUTH_PROVIDER_X509_CERT_URL,
+	client_x509_cert_url: process.env.CLIENT_X509_CERT_URL,
+}
+const storage = new Storage({
+	credentials,
+})
+
+async function fetchCompanyFactsData(): Promise<NodeJS.ReadableStream> {
+	const response = await axios.get(
+		'https://www.sec.gov/Archives/edgar/daily-index/bulkdata/submissions.zip',
+		{ responseType: 'stream' }
+	)
+	if (!response.data) {
+		throw new Error('No data received from URL.')
+	}
 	return response.data
 }
 
 async function parseCompanyFactsData(buffer: Buffer): Promise<any[]> {
-	console.log(buffer)
 	if (!buffer) {
 		throw new Error('Buffer is null or undefined.')
 	}
 
-	const zip = await JSZip.loadAsync(buffer)
-	const files = Object.values(zip.files).filter(file => /\.json$/i.test(file.name))
+	const zip = new AdmZip(buffer)
+	const files = zip.getEntries().filter((file) => /\.json$/i.test(file.name))
 
 	if (!files.length) {
 		throw new Error('No JSON files found in ZIP archive.')
 	}
 
-	const results: any[] = []
+	const results: unknown[] = []
 	for (const file of files) {
-		const content = await file.async('string')
+		const content = file.getData().toString('utf-8')
 		const data = JSON.parse(content)
 		results.push(data)
 	}
 
-	const transformedCompanies = results.map(company => ({
-		name: company.name || '',
-		cik: company.cik || '',
-		// add more fields as needed
+	const companies = results as unknown as Company[]
+
+	const transformedCompanies = companies.map((company: Company) => ({
+		entityName: company.entityName,
+		cik: company.cik,
+		facts: company.facts,
 	}))
 	return transformedCompanies
 }
@@ -46,21 +70,36 @@ async function saveCompanyFactsDataToDatabase(data: any[]): Promise<void> {
 		}
 	}
 }
+
 export async function processCompanyFactsData(): Promise<void> {
 	try {
-		const buffer = await fetchCompanyFactsData()
-		const data = await parseCompanyFactsData(buffer)
-		await saveCompanyFactsDataToDatabase(data)
-		console.log('Data saved to MongoDB')
+		const fileStream = await fetchCompanyFactsData()
+		const bucketName = 'YOUR_BUCKET_NAME'
+		const fileName = 'submissions.zip'
+		const bucket = storage.bucket(bucketName)
+		const file = bucket.file(fileName)
+
+		const stream = file.createWriteStream({
+			resumable: false,
+			metadata: {
+				contentType: 'application/zip',
+			},
+		})
+
+		stream.on('error', (err) => {
+			console.error(err)
+		})
+
+		stream.on('finish', async () => {
+			console.log(`File ${fileName} uploaded to bucket ${bucketName}.`)
+			const buffer = await file.download()
+			const data = await parseCompanyFactsData(buffer[0])
+			await saveCompanyFactsDataToDatabase(data)
+			console.log('Data saved to MongoDB')
+		})
+
+		await pipeline(fileStream, stream)
 	} catch (error) {
 		console.log(error)
 	}
 }
-
-(async () => {
-	try {
-		await processCompanyFactsData()
-	} catch (error) {
-		console.log(error)
-	}
-})()

@@ -1,13 +1,38 @@
-import { Schema, model } from 'mongoose'
+import {
+	Document, model, Model, Schema,
+} from 'mongoose'
 
-interface Company {
-  [key: string]: any;
+export interface Company {
+  cik: number;
+  entityName: string;
+  facts: {
+    [key: string]: {
+      [key: string]: {
+        [key: string]: any;
+      };
+    };
+  };
 }
 
-const CompanySchema = new Schema<Company>({
-	// Any field can be added to the schema using the Mixed type
+export interface CompanyDocument extends Company, Document {}
+
+export type CompanyModel = Model<CompanyDocument>
+
+const CompanySchema = new Schema<CompanyDocument>({
+	cik: {
+		type: Number,
+		required: true,
+	},
+	entityName: {
+		type: String,
+		required: true,
+	},
+	facts: {
+		type: Schema.Types.Mixed,
+		required: true,
+	},
 }, {
-	strict: false, // Disable strict mode to allow for dynamic schema
+	strict: false,
 })
 
-export const CompanyModel = model<Company>('Company', CompanySchema)
+export default model<CompanyDocument, CompanyModel>('EdgarInfo', CompanySchema)
