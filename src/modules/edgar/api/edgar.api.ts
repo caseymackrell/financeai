@@ -23,7 +23,7 @@ const storage = new Storage({
 
 async function fetchCompanyFactsData(): Promise<NodeJS.ReadableStream> {
 	const response = await axios.get(
-		'https://www.sec.gov/Archives/edgar/daily-index/bulkdata/submissions.zip',
+		'https://www.sec.gov/Archives/edgar/daily-index/xbrl/companyfacts.zip',
 		{ responseType: 'stream' }
 	)
 	if (!response.data) {
